@@ -1,6 +1,10 @@
 """
 Test the recipe API
 """
+import tempfile
+import os
+
+from PIL import Image
 
 from decimal import Decimal
 
@@ -22,6 +26,11 @@ RECIPES_URL = reverse("recipe:recipe-list")
 def detail_url(recipe_id):
     """Return recipe detail URL."""
     return reverse("recipe:recipe-detail", args=[recipe_id])
+
+
+def image_upload_url(recipe_id):
+    """Return URL for recipe image upload."""
+    return reverse("recipe:recipe-upload-image", args=[recipe_id])
 
 
 # for test to quickly create a recipe (with default values)
@@ -372,3 +381,37 @@ class PrivateRecipeApiTests(TestCase):
 
         self.assertEqual(res.status_code, status.HTTP_200_OK)
         self.assertEqual(recipe.ingredients.count(), 0)
+
+
+class ImageUploadTests(TestCase):
+    """Test image upload."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.user = create_user(email="user@example.com", password="Testpass123")
+        self.client.force_authenticate(self.user)
+        self.recipe = create_recipe(user=self.user)
+
+    def tearDown(self):
+        self.recipe.image.delete()
+
+    def test_upload_image_to_recipe(self):
+        """Test uploading an image to a recipe."""
+        url = image_upload_url(self.recipe.id)
+        with tempfile.NamedTemporaryFile(suffix=".jpg") as image_file:
+            img = Image.new("RGB", (10, 10))  # pillow created image
+            img.save(image_file, format="JPEG")  # save image to file
+            image_file.seek(0)  # move to the beginning of the file
+            res = self.client.post(url, {"image": image_file}, format="multipart")
+
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.recipe.refresh_from_db()
+        self.assertIn("image", res.data)
+        self.assertTrue(os.path.exists(self.recipe.image.path))
+
+    def test_upload_image_bad_request(self):
+        """Test uploading an invalid image."""
+        url = image_upload_url(self.recipe.id)
+        res = self.client.post(url, {"image": "notimage"}, format="multipart")
+
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
